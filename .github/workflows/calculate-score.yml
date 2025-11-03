@@ -2,12 +2,9 @@ name: Calculate Student Score
 
 on:
   schedule:
-    # 每天北京时间早上8点运行（UTC时间0点，北京时间=UTC+8）
     - cron: '0 0 * * *'
   workflow_dispatch:
-    # 允许手动触发
   push:
-    # 每次push都会触发CI
     branches:
       - main
 
@@ -26,19 +23,15 @@ jobs:
       - name: Check for student's article
         id: check_article
         run: |
-          # 获取仓库信息
           REPO_NAME=${{ github.repository }}
           OWNER=$(echo $REPO_NAME | cut -d'/' -f1)
           REPO=$(echo $REPO_NAME | cut -d'/' -f2)
           
-          # 检查是否存在以用户名命名的.md文件
           ARTICLE_EXISTS=0
           
-          # 获取仓库内容列表
           CONTENTS_RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/$OWNER/$REPO/contents")
           
-          # 检查是否有以OWNER命名的md文件
           if echo "$CONTENTS_RESPONSE" | jq -r '.[].name' | grep -q "^$OWNER\.md$"; then
             ARTICLE_EXISTS=1
             echo "Found article file: $OWNER.md"
@@ -48,7 +41,6 @@ jobs:
           
           echo "article_exists=$ARTICLE_EXISTS" >> $GITHUB_ENV
           
-          # 如果文章存在，给20分奖励
           if [ $ARTICLE_EXISTS -eq 1 ]; then
             ARTICLE_BONUS=20
           else
@@ -59,50 +51,39 @@ jobs:
       - name: Calculate score based on GitHub metrics
         id: calculate
         run: |
-          # 获取仓库信息
           REPO_NAME=${{ github.repository }}
           OWNER=$(echo $REPO_NAME | cut -d'/' -f1)
           REPO=$(echo $REPO_NAME | cut -d'/' -f2)
           
           echo "Repository: $OWNER/$REPO"
           
-          # 使用GitHub API获取数据
-          # 获取star数量
           STARS_RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/$OWNER/$REPO")
           STARS=$(echo $STARS_RESPONSE | jq -r '.stargazers_count // 0')
           echo "Stars response: $STARS_RESPONSE"
           
-          # 获取所有issues（不包括PR）
           ALL_ISSUES_RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/$OWNER/$REPO/issues?state=all&per_page=100")
           ALL_ISSUES=$(echo "$ALL_ISSUES_RESPONSE" | jq -r 'map(select(.pull_request == null)) | length')
           
-          # 获取open issues（不包括PR）
           OPEN_ISSUES_RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/$OWNER/$REPO/issues?state=open&per_page=100")
           OPEN_ISSUES=$(echo "$OPEN_ISSUES_RESPONSE" | jq -r 'map(select(.pull_request == null)) | length')
           
-          # 计算closed issues
           CLOSED_ISSUES=$((ALL_ISSUES - OPEN_ISSUES))
           
-          # 获取PR数量
           PRS_RESPONSE=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             "https://api.github.com/repos/$OWNER/$REPO/pulls?state=all&per_page=100")
           PR_COUNT=$(echo "$PRS_RESPONSE" | jq -r 'length')
           
-          # 权重定义
           STAR_WEIGHT=10
           ISSUE_WEIGHT=20
           PR_WEIGHT=30
           
-          # 获取文章奖励分数
           ARTICLE_BONUS=${{ env.article_bonus }}
           
-          # 计算分数
           SCORE=$((STARS * STAR_WEIGHT + CLOSED_ISSUES * ISSUE_WEIGHT + PR_COUNT * PR_WEIGHT + ARTICLE_BONUS))
           
-          # 输出结果
           echo "=================== 学员成绩报告 ==================="
           echo "Stars: $STARS (权重: $STAR_WEIGHT) = $((STARS * STAR_WEIGHT)) 分"
           echo "已解决的Issues: $CLOSED_ISSUES (权重: $ISSUE_WEIGHT) = $((CLOSED_ISSUES * ISSUE_WEIGHT)) 分"
@@ -112,7 +93,6 @@ jobs:
           echo "总分: $SCORE 分"
           echo "更新时间: $(date)"
           
-          # 保存为环境变量供后续步骤使用
           echo "stars=$STARS" >> $GITHUB_ENV
           echo "issues=$CLOSED_ISSUES" >> $GITHUB_ENV
           echo "prs=$PR_COUNT" >> $GITHUB_ENV
@@ -120,22 +100,17 @@ jobs:
           
       - name: Post summary JSON to remote API
         run: |
-          # 获取仓库信息
           REPO_NAME=${{ github.repository }}
           OWNER=$(echo $REPO_NAME | cut -d'/' -f1)
           REPO=$(echo $REPO_NAME | cut -d'/' -f2)
           
-          # 获取触发CI的用户
           ACTOR=${{ github.actor }}
           
-          # 加密的配置信息 (Base64编码)
           ENCRYPTED_CONFIG="QVBJX1RPS0VOPWUzNjE5Y2NkZGFmYzQ3NTg5YmJlNzg4Y2EzMWEyZGYwCkFQSV9VUkw9aHR0cHM6Ly9hcGkub3BlbmNhbXAuY24vd2ViL2FwaS9jb3Vyc2VSYW5rL2NyZWF0ZUJ5VGhpcmRUb2tlbgpDT1VSU0VfSUQ9MTk0OAo="
           
-          # 解密配置信息
           echo "$ENCRYPTED_CONFIG" | base64 -d > /tmp/decrypted-config.env
           source /tmp/decrypted-config.env
           
-          # 创建JSON数据
           SUMMARY=$(cat <<EOF
           {
             "channel": "github",
@@ -148,7 +123,6 @@ jobs:
           EOF
           )
           
-          # 发送到远程API
           curl -X POST "$API_URL" \
             -H "accept: application/json;charset=utf-8" \
             -H "Content-Type: application/json" \
@@ -156,5 +130,4 @@ jobs:
             -d "$SUMMARY" \
             -v
             
-          # 清理临时文件
           rm /tmp/decrypted-config.env
